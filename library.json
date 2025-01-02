@@ -1,0 +1,17 @@
+{
+    "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
+    "name": "Telegraph",
+    "description": "A Software Serial library for multiple parallels connections",
+    "version": "0.1.0",
+    "license": "GPL-3.0",
+    "build": {
+        "srcDir": "./src"
+    },
+    "authors": {
+        "name": "Grégoire BADICHE"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/gregoire-badiche/telegraph"
+    }
+}
