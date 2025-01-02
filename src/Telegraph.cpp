@@ -8,14 +8,14 @@ namespace
 {
     unsigned long delta_ulong(unsigned long a, unsigned long b)
     {
-        // if (a < b)
-        // {
-        //     return a + ULONG_MAX - b;
-        // }
-        // if (a == b)
-        // {
-        //     return 0;
-        // }
+        if (a < b)
+        {
+            return a + ULONG_MAX - b;
+        }
+        if (a == b)
+        {
+            return 0;
+        }
         return a - b;
     }
 
@@ -55,7 +55,6 @@ namespace master
         freq = frequency;
         delta_us = 1000000 / frequency;
         digitalWrite(tx_pin, HIGH);
-        Serial.println(n_listeners);
     }
 
     byte Telegraph::read(unsigned short id)
@@ -98,7 +97,7 @@ namespace master
         check_id;
 
         unsigned long t = micros();
-        while (delta_ulong(micros(), t) < MIN_AVAILABLE_DELTA)
+        while (delta_ulong(micros(), t) <= MIN_AVAILABLE_DELTA)
         {
             if (digitalRead(rx_pins[id]) == LOW)
             {
@@ -129,7 +128,7 @@ namespace master
                     s--;
                     continue;
                 }
-                if (delta_ulong(micros(), times[i]) < MIN_AVAILABLE_DELTA)
+                if (delta_ulong(micros(), times[i]) <= MIN_AVAILABLE_DELTA)
                 {
                     if (digitalRead(rx_pins[i]) == LOW)
                     {
@@ -172,7 +171,7 @@ namespace master
                 }
                 else
                 {
-                    bool r = digitalRead(rx_pins[i]);
+                    bool r = (bool)digitalRead(rx_pins[i]);
                     if (r == HIGH)
                     {
                         if (channels[i].previous_reading == LOW)
@@ -184,12 +183,12 @@ namespace master
                     }
                     else
                     {
-                        if (channels[i].previous_reading == HIGH && delta_ulong(micros(), channels[i].time) > delta_us / 2)
+                        if (channels[i].previous_reading == HIGH && delta_ulong(micros(), channels[i].time) >= delta_us / 2)
                         {
                             channels[i].mid_activated = true;
                             channels[i].time = micros();
                         }
-                        if (channels[i].previous_reading == LOW && channels[i].mid_activated == true && delta_ulong(micros(), channels[i].time) > delta_us / 2)
+                        if (channels[i].previous_reading == LOW && channels[i].mid_activated == true && delta_ulong(micros(), channels[i].time) >= delta_us / 2)
                         {
                             channels[i].activated = true;
                             channels[i].time += delta_us / 2;
@@ -211,7 +210,7 @@ namespace master
                 {
                     channels[i].time = micros();
                 }
-                else if (delta_ulong(micros(), channels[i].time) > MIN_AVAILABLE_DELTA)
+                else if (delta_ulong(micros(), channels[i].time) >= MIN_AVAILABLE_DELTA)
                 {
                     channels[i].available = true;
                     channels[i].time = 0;
@@ -240,17 +239,17 @@ namespace master
         {
             digitalWrite(tx_pin, data & 0x80);
             data <<= 1;
-            precise_delay(delta_us + t - micros());
             t += delta_us;
+            precise_delay(t - micros());
         }
     }
 
     void Telegraph::reset_channel(unsigned short id)
     {
         check_id;
-        channels[id].activated = 0;
+        channels[id].activated = false;
         channels[id].time = 0;
-        channels[id].mid_activated = 0;
+        channels[id].mid_activated = false;
         channels[id].val = 0x00;
         channels[id].previous_reading = LOW;
         channels[id].n_bits_read = 0;
@@ -309,7 +308,7 @@ namespace client
     void Telegraph::await()
     {
         unsigned long t = micros();
-        while (delta_ulong(micros(), t) < MIN_AVAILABLE_DELTA)
+        while (delta_ulong(micros(), t) <= MIN_AVAILABLE_DELTA)
         {
             if (digitalRead(rx_pin) == LOW)
             {
@@ -339,8 +338,8 @@ namespace client
         {
             digitalWrite(tx_pin, data & 0x80);
             data <<= 1;
-            precise_delay(delta_us + t - micros());
             t += delta_us;
+            precise_delay(t - micros());
         }
     }
 
@@ -426,12 +425,12 @@ namespace client
                 }
                 else
                 {
-                    if (channel.previous_reading == HIGH && delta_ulong(micros(), channel.time) > delta_us / 2)
+                    if (channel.previous_reading == HIGH && delta_ulong(micros(), channel.time) >= delta_us / 2)
                     {
                         channel.mid_activated = true;
                         channel.time = micros();
                     }
-                    if (channel.previous_reading == LOW && channel.mid_activated == true && delta_ulong(micros(), channel.time) > delta_us / 2)
+                    if (channel.previous_reading == LOW && channel.mid_activated == true && delta_ulong(micros(), channel.time) >= delta_us / 2)
                     {
                         channel.activated = true;
                         channel.time += delta_us / 2;
@@ -453,7 +452,7 @@ namespace client
             {
                 channel.time = micros();
             }
-            else if (delta_ulong(micros(), channel.time) > MIN_AVAILABLE_DELTA)
+            else if (delta_ulong(micros(), channel.time) >= MIN_AVAILABLE_DELTA)
             {
                 channel.available = true;
                 channel.time = 0;
@@ -487,8 +486,8 @@ namespace client
             {
                 val <<= 1;
                 val += (short)digitalRead(rx_pin);
-                precise_delay(t + delta_us - micros());
                 t += delta_us;
+                precise_delay(t - micros());
             }
 
             buffer.push(val);
