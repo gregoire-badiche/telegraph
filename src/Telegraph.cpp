@@ -479,15 +479,13 @@ namespace client
 
             wait_activation(delta_us / 2);
 
-            precise_delay(delta_us);
-
             unsigned long t = micros();
             for (int j = 0; j < 8; j++)
             {
-                val <<= 1;
-                val += (short)digitalRead(rx_pin);
                 t += delta_us;
                 precise_delay(t - micros());
+                val <<= 1;
+                val += (short)digitalRead(rx_pin);
             }
 
             buffer.push(val);
