@@ -6,6 +6,9 @@
 
 namespace
 {
+    /**
+     * @brief Compute a delta between two ulong, taking into account the possible overflow
+     */
     unsigned long delta_ulong(unsigned long a, unsigned long b)
     {
         if (a < b)
@@ -19,6 +22,10 @@ namespace
         return a - b;
     }
 
+    /**
+     * @brief Long delay precise to the microseconds, can take any value (while delayMicroseconds() is limited in size)
+     * @param us Delay in microseconds
+     */
     void precise_delay(unsigned int us)
     {
         unsigned int m = us / 1000;
@@ -30,7 +37,6 @@ namespace
 
 namespace master
 {
-
     Telegraph::Telegraph(int tx_pin) : tx_pin(tx_pin)
     {
         for (int i = 0; i < MAX_LISTENERS; i++)
@@ -79,7 +85,7 @@ namespace master
         }
     }
 
-    int Telegraph::buff_size(unsigned short id)
+    unsigned short Telegraph::buff_size(unsigned short id)
     {
         if (id > n_listeners || id < 0)
             return 0;
@@ -295,7 +301,7 @@ namespace client
         }
     }
 
-    int Telegraph::buff_size()
+    unsigned short Telegraph::buff_size()
     {
         return buffer.size();
     }
