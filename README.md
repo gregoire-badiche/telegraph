@@ -34,8 +34,6 @@ You can just fork this repo and submit your changes with a detailled commit mess
 
 This project is needing some serious documentation and comments.
 
-A new feature would be a non-blocking write() function for the master
-
-I want to make the communication more reliable by adding som error correction (using parity bits).
+I want to make the communication more reliable by adding some error correction (using parity bits).
 
 I also want to restrict the delay (and thus the baud rate) in such a way that at higher frequencies, a 4MHz or a 16MHz card can still communicate.

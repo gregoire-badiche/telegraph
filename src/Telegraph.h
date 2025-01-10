@@ -73,7 +73,7 @@ namespace TelegraphUtils
     };
 }
 
-typedef struct
+struct channel_t
 {
     unsigned long time;
     bool activated;
@@ -83,7 +83,16 @@ typedef struct
     unsigned short id;
     bool previous_reading;
     unsigned short n_bits_read;
-} channel_t;
+};
+
+struct transmit_t
+{
+    TelegraphUtils::list data;
+    byte bit_n;
+    unsigned long time;
+    bool u;
+};
+
 
 namespace master
 {
@@ -97,6 +106,7 @@ namespace master
         unsigned short n_listeners = 0;
         list buffers[MAX_LISTENERS];
         channel_t channels[MAX_LISTENERS];
+        transmit_t transmit;
         unsigned int freq;
         unsigned int delta_us;
 
@@ -104,6 +114,8 @@ namespace master
         void end_transmission();
         void transmit_byte(byte data);
         void reset_channel(unsigned short id);
+        void recieve_async();
+        void transmit_async();
 
     public:
         /**
@@ -145,6 +157,14 @@ namespace master
          * @warning Blocking function
          */
         void write(byte *data, unsigned int size);
+
+        /**
+         * @brief Write a serie of bytes to the TX pin, in a non-blocking fashion
+         * @param data A pointer to the array of byte to be written
+         * @param size The size of the array
+         * @warning size < BUFFER_MAX_SIZE
+         */
+        void send(byte *data, unsigned short size);
 
         /**
          * @brief Get the logical size of the data buffer
@@ -193,6 +213,7 @@ namespace client
         int tx_pin;
         list buffer;
         channel_t channel;
+        transmit_t transmit;
         unsigned int freq;
         unsigned int delta_us;
 
@@ -201,6 +222,8 @@ namespace client
         void transmit_byte(byte data);
         void wait_activation(unsigned int min_delay_ms);
         void reset_channel();
+        void recieve_async();
+        void transmit_async();
 
     public:
         /**
@@ -234,6 +257,14 @@ namespace client
          * @warning Blocking function
          */
         void write(byte *data, unsigned int size);
+
+        /**
+         * @brief Write a serie of bytes to the TX pin, in a non-blocking fashion
+         * @param data A pointer to the array of byte to be written
+         * @param size The size of the array
+         * @warning size < BUFFER_MAX_SIZE
+         */
+        void send(byte *data, unsigned short size);
 
         /**
          * @brief Get the logical size of the data buffer

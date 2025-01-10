@@ -46,6 +46,11 @@ namespace master
             channels[i].available = false;
             channels[i].id = i;
         }
+
+        transmit.time = 0;
+        transmit.u = false;
+        transmit.bit_n = 0x00;
+        transmit.data = list();
     }
 
     short Telegraph::listen(int rx_pin)
@@ -150,7 +155,7 @@ namespace master
         }
     }
 
-    void Telegraph::tick()
+    void Telegraph::recieve_async()
     {
         for (unsigned short i = 0; i < n_listeners; i++)
         {
@@ -169,8 +174,8 @@ namespace master
                     unsigned long t = micros();
                     if (delta_ulong(t, channels[i].time) >= delta_us)
                     {
-                        channels[i].val <<= 1;
-                        channels[i].val += (short)digitalRead(rx_pins[i]);
+                        channels[i].val >>= 1;
+                        channels[i].val += (char)digitalRead(rx_pins[i]) << 7;
                         channels[i].time += delta_us;
                         channels[i].n_bits_read++;
                     }
@@ -225,6 +230,67 @@ namespace master
         }
     }
 
+    void Telegraph::transmit_async()
+    {
+        if (transmit.data.size() == 0)
+            return;
+
+        // Activation sequence
+        if (transmit.time == 0)
+        {
+            transmit.bit_n = 0x01;
+            digitalWrite(tx_pin, HIGH);
+            transmit.time = micros();
+            transmit.u = false;
+            return;
+        }
+        if (transmit.u == false)
+        {
+            if (delta_ulong(micros(), transmit.time) >= delta_us)
+            {
+                digitalWrite(tx_pin, LOW);
+                transmit.time += delta_us;
+                transmit.u = true;
+            }
+            return;
+        }
+        
+        // End of the message
+        if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
+        {
+            digitalWrite(tx_pin, HIGH);
+            transmit.data.pop();
+            transmit.u = false;
+            transmit.time = 0;
+            return;
+        }
+
+        // Tranmission of the message
+        if (delta_ulong(micros(), transmit.time) >= delta_us)
+        {
+            digitalWrite(tx_pin, (transmit.data.peek() & transmit.bit_n) || 0);
+            transmit.bit_n <<= 1;
+            transmit.time += delta_us;
+            return;
+        }
+    }
+
+    void Telegraph::tick()
+    {
+        recieve_async();
+        transmit_async();
+    }
+
+    void Telegraph::send(byte *data, unsigned short size)
+    {
+        assert(size + transmit.data.size() < BUFFER_MAX_SIZE);
+
+        for (unsigned short i = 0; i < size; i++)
+        {
+            transmit.data.push(data[i]);
+        }
+    }
+
     void Telegraph::begin_transmission()
     {
         digitalWrite(tx_pin, HIGH);
@@ -243,8 +309,8 @@ namespace master
         unsigned long t = micros();
         for (int i = 0; i < 8; i++)
         {
-            digitalWrite(tx_pin, data & 0x80);
-            data <<= 1;
+            digitalWrite(tx_pin, data & 0x01);
+            data >>= 1;
             t += delta_us;
             precise_delay(t - micros());
         }
@@ -270,6 +336,11 @@ namespace client
         reset_channel();
         channel.available = false;
         channel.id = 0;
+
+        transmit.time = 0;
+        transmit.u = false;
+        transmit.bit_n = 0x00;
+        transmit.data = list();
     }
 
     void Telegraph::begin(unsigned int frequency)
@@ -342,8 +413,8 @@ namespace client
         unsigned long t = micros();
         for (int i = 0; i < 8; i++)
         {
-            digitalWrite(tx_pin, data & 0x80);
-            data <<= 1;
+            digitalWrite(tx_pin, data & 0x01);
+            data >>= 1;
             t += delta_us;
             precise_delay(t - micros());
         }
@@ -395,7 +466,7 @@ namespace client
         channel.n_bits_read = 0;
     }
 
-    void Telegraph::tick()
+    void Telegraph::recieve_async()
     {
         if (channel.available)
         {
@@ -411,8 +482,8 @@ namespace client
 
                 if (delta_ulong(micros(), channel.time) >= delta_us)
                 {
-                    channel.val <<= 1;
-                    channel.val += (short)digitalRead(rx_pin);
+                    channel.val >>= 1;
+                    channel.val += (char)digitalRead(rx_pin) << 7;
                     channel.time += delta_us;
                     channel.n_bits_read++;
                 }
@@ -466,6 +537,67 @@ namespace client
         }
     }
 
+    void Telegraph::transmit_async()
+    {
+        if (transmit.data.size() == 0)
+            return;
+
+        // Activation sequence
+        if (transmit.time == 0)
+        {
+            transmit.bit_n = 0x01;
+            digitalWrite(tx_pin, HIGH);
+            transmit.time = micros();
+            transmit.u = false;
+            return;
+        }
+        if (transmit.u == false)
+        {
+            if (delta_ulong(micros(), transmit.time) >= delta_us)
+            {
+                digitalWrite(tx_pin, LOW);
+                transmit.time += delta_us;
+                transmit.u = true;
+            }
+            return;
+        }
+        
+        // End of the message
+        if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
+        {
+            digitalWrite(tx_pin, HIGH);
+            transmit.data.pop();
+            transmit.u = false;
+            transmit.time = 0;
+            return;
+        }
+
+        // Tranmission of the message
+        if (delta_ulong(micros(), transmit.time) >= delta_us)
+        {
+            digitalWrite(tx_pin, (transmit.data.peek() & transmit.bit_n) || 0);
+            transmit.bit_n <<= 1;
+            transmit.time += delta_us;
+            return;
+        }
+    }
+
+    void Telegraph::tick()
+    {
+        recieve_async();
+        transmit_async();
+    }
+
+    void Telegraph::send(byte *data, unsigned short size)
+    {
+        assert(size + transmit.data.size() < BUFFER_MAX_SIZE);
+
+        for (unsigned short i = 0; i < size; i++)
+        {
+            transmit.data.push(data[i]);
+        }
+    }
+
     void Telegraph::recv(unsigned short size)
     {
         assert(size < BUFFER_MAX_SIZE);
@@ -490,8 +622,8 @@ namespace client
             {
                 t += delta_us;
                 precise_delay(t - micros());
-                val <<= 1;
-                val += (short)digitalRead(rx_pin);
+                val >>= 1;
+                val += (char)digitalRead(rx_pin) << 7;
             }
 
             buffer.push(val);
