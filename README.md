@@ -6,11 +6,13 @@ A Software Serial library for multiple parallels connections using a broadcast s
 
 The goal is to connect multiple Arduinos (the `modules`) around a center one (the `master`) that handles messages on multiples RX and broadcast them on a single TX, with all the modules connected in parallel on the same TX output. Ths system allows multiple connections while keeping the number of pins used manageable.
 
+The protocol used is based on UART 8N1.
+
 ## How To
 
 ### Hardware Setup
 
-Simply choose your master, define your `TX` în and all your `RXs` pins, and connect all your modules to the `TX` pin and a `RX` pin.
+Simply choose your master, define your `TX` in and all your `RX`s pins, and connect all your modules to the `TX` pin and a `RX` pin.
 
 :warning: Do not forget to also connect all the grounds together for a more reliable output!
 

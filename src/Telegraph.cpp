@@ -82,6 +82,12 @@ namespace master
 
     void Telegraph::write(byte *data, unsigned int size)
     {
+        // Empty the transmit_async buffer
+        while (!transmit.data.size())
+        {
+            tick();
+        }
+        
         for (unsigned int i = 0; i < size; i++)
         {
             begin_transmission();
@@ -159,65 +165,10 @@ namespace master
     {
         for (unsigned short i = 0; i < n_listeners; i++)
         {
-            if (channels[i].available)
+            // If the channel is unavailable
+            if (!channels[i].available)
             {
-                if (channels[i].activated == true)
-                {
-                    if (channels[i].n_bits_read >= 8)
-                    {
-                        if (buffers[i].size() < BUFFER_MAX_SIZE)
-                            buffers[i].push(channels[i].val);
-                        reset_channel(i);
-                        continue;
-                    }
-
-                    unsigned long t = micros();
-                    if (delta_ulong(t, channels[i].time) >= delta_us)
-                    {
-                        channels[i].val >>= 1;
-                        channels[i].val += (char)digitalRead(rx_pins[i]) << 7;
-                        channels[i].time += delta_us;
-                        channels[i].n_bits_read++;
-                    }
-                }
-                else
-                {
-                    bool r = (bool)digitalRead(rx_pins[i]);
-                    if (r == HIGH)
-                    {
-                        if (channels[i].previous_reading == LOW)
-                        {
-                            channels[i].time = micros();
-                        }
-                        channels[i].mid_activated = false;
-                        channels[i].previous_reading = HIGH;
-                    }
-                    else
-                    {
-                        if (channels[i].previous_reading == HIGH && delta_ulong(micros(), channels[i].time) >= delta_us / 2)
-                        {
-                            channels[i].mid_activated = true;
-                            channels[i].time = micros();
-                        }
-                        if (channels[i].previous_reading == LOW && channels[i].mid_activated == true && delta_ulong(micros(), channels[i].time) >= delta_us / 2)
-                        {
-                            channels[i].activated = true;
-                            channels[i].time += delta_us / 2;
-                        }
-
-                        channels[i].previous_reading = LOW;
-                    }
-                }
-            }
-            else
-            {
-                if (digitalRead(rx_pins[i]) == LOW)
-                {
-                    channels[i].time = 0;
-                    continue;
-                }
-
-                if (channels[i].time == 0)
+                if (digitalRead(rx_pins[i]) == LOW || channels[i].time == 0)
                 {
                     channels[i].time = micros();
                 }
@@ -226,6 +177,60 @@ namespace master
                     channels[i].available = true;
                     channels[i].time = 0;
                 }
+
+                return;
+            }
+
+            // If the channel is available but isn't activated yet
+            if (!channels[i].activated)
+            {
+                bool r = digitalRead(rx_pins[i]);
+                if (r == HIGH)
+                {
+                    if (channels[i].previous_reading == LOW)
+                    {
+                        channels[i].time = micros();
+                    }
+                    channels[i].mid_activated = false;
+                    channels[i].previous_reading = HIGH;
+
+                    return;
+                }
+
+                if (delta_ulong(micros(), channels[i].time) < delta_us / 2)
+                    return;
+
+                if (channels[i].previous_reading == HIGH)
+                {
+                    channels[i].mid_activated = true;
+                    channels[i].time = micros();
+                }
+
+                if (channels[i].previous_reading == LOW && channels[i].mid_activated == true)
+                {
+                    channels[i].activated = true;
+                    channels[i].time += delta_us / 2;
+                }
+
+                channels[i].previous_reading = LOW;
+                return;
+            }
+
+            // If the channel is available, activated, and we need to read
+            if (delta_ulong(micros(), channels[i].time) >= delta_us)
+            {
+                channels[i].val >>= 1;
+                channels[i].val += (char)digitalRead(rx_pins[i]) << 7;
+                channels[i].time += delta_us;
+                channels[i].n_bits_read++;
+            }
+
+            // If the channel is available and activated, but it's the end of the byte
+            if (channels[i].n_bits_read >= 8)
+            {
+                if (buffers[i].size() < BUFFER_MAX_SIZE)
+                    buffers[i].push(channels[i].val);
+                reset_channel(i);
             }
         }
     }
@@ -254,7 +259,7 @@ namespace master
             }
             return;
         }
-        
+
         // End of the message
         if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
         {
@@ -364,6 +369,12 @@ namespace client
 
     void Telegraph::write(byte *data, unsigned int size)
     {
+        // Empty the transmit_async buffer
+        while (!transmit.data.size())
+        {
+            tick();
+        }
+
         for (unsigned short i = 0; i < size; i++)
         {
             begin_transmission();
@@ -468,64 +479,10 @@ namespace client
 
     void Telegraph::recieve_async()
     {
-        if (channel.available)
+        // If the channel is unavailable
+        if (!channel.available)
         {
-            if (channel.activated == true)
-            {
-                if (channel.n_bits_read >= 8)
-                {
-                    if (buffer.size() < BUFFER_MAX_SIZE)
-                        buffer.push(channel.val);
-                    reset_channel();
-                    return;
-                }
-
-                if (delta_ulong(micros(), channel.time) >= delta_us)
-                {
-                    channel.val >>= 1;
-                    channel.val += (char)digitalRead(rx_pin) << 7;
-                    channel.time += delta_us;
-                    channel.n_bits_read++;
-                }
-            }
-            else
-            {
-                bool r = digitalRead(rx_pin);
-                if (r == HIGH)
-                {
-                    if (channel.previous_reading == LOW)
-                    {
-                        channel.time = micros();
-                    }
-                    channel.mid_activated = false;
-                    channel.previous_reading = HIGH;
-                }
-                else
-                {
-                    if (channel.previous_reading == HIGH && delta_ulong(micros(), channel.time) >= delta_us / 2)
-                    {
-                        channel.mid_activated = true;
-                        channel.time = micros();
-                    }
-                    if (channel.previous_reading == LOW && channel.mid_activated == true && delta_ulong(micros(), channel.time) >= delta_us / 2)
-                    {
-                        channel.activated = true;
-                        channel.time += delta_us / 2;
-                    }
-
-                    channel.previous_reading = LOW;
-                }
-            }
-        }
-        else
-        {
-            if (digitalRead(rx_pin) == LOW)
-            {
-                channel.time = 0;
-                return;
-            }
-
-            if (channel.time == 0)
+            if (digitalRead(rx_pin) == LOW || channel.time == 0)
             {
                 channel.time = micros();
             }
@@ -534,6 +491,60 @@ namespace client
                 channel.available = true;
                 channel.time = 0;
             }
+
+            return;
+        }
+
+        // If the channel is available but isn't activated yet
+        if (!channel.activated)
+        {
+            bool r = digitalRead(rx_pin);
+            if (r == HIGH)
+            {
+                if (channel.previous_reading == LOW)
+                {
+                    channel.time = micros();
+                }
+                channel.mid_activated = false;
+                channel.previous_reading = HIGH;
+
+                return;
+            }
+
+            if (delta_ulong(micros(), channel.time) < delta_us / 2)
+                return;
+
+            if (channel.previous_reading == HIGH)
+            {
+                channel.mid_activated = true;
+                channel.time = micros();
+            }
+
+            if (channel.previous_reading == LOW && channel.mid_activated == true)
+            {
+                channel.activated = true;
+                channel.time += delta_us / 2;
+            }
+
+            channel.previous_reading = LOW;
+            return;
+        }
+
+        // If the channel is available, activated, and we need to read
+        if (delta_ulong(micros(), channel.time) >= delta_us)
+        {
+            channel.val >>= 1;
+            channel.val += (char)digitalRead(rx_pin) << 7;
+            channel.time += delta_us;
+            channel.n_bits_read++;
+        }
+
+        // If the channel is available and activated, but it's the end of the byte
+        if (channel.n_bits_read >= 8)
+        {
+            if (buffer.size() < BUFFER_MAX_SIZE)
+                buffer.push(channel.val);
+            reset_channel();
         }
     }
 
@@ -561,7 +572,7 @@ namespace client
             }
             return;
         }
-        
+
         // End of the message
         if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
         {
