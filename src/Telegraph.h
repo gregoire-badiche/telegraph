@@ -18,12 +18,40 @@
 #define MIN_AVAILABLE_DELTA 500000
 #endif
 
-namespace TelegraphUtils
+namespace telegraph
 {
+    /**
+     * @brief Compute a delta between two ulong, taking into account the possible overflow
+     */
+    unsigned long delta_ulong(unsigned long a, unsigned long b)
+    {
+        if (a < b)
+        {
+            return a + ULONG_MAX - b;
+        }
+        if (a == b)
+        {
+            return 0;
+        }
+        return a - b;
+    }
+
+    /**
+     * @brief Long delay precise to the microseconds, can take any value (while delayMicroseconds() is limited in size)
+     * @param us Delay in microseconds
+     */
+    void precise_delay(unsigned int us)
+    {
+        unsigned int m = us / 1000;
+        unsigned int u = us - m * 1000;
+        delay(m);
+        delayMicroseconds(u);
+    }
+
     /**
      * Implementation of a queue, using a fixed size array for better efficiency
      */
-    class list
+    class StackBuffer
     {
     private:
         unsigned short start;
@@ -31,7 +59,7 @@ namespace TelegraphUtils
         byte data[BUFFER_MAX_SIZE];
 
     public:
-        list()
+        StackBuffer()
         {
             start = 0;
             stop = 0;
@@ -71,121 +99,100 @@ namespace TelegraphUtils
             return i & (BUFFER_MAX_SIZE - 1);
         }
     };
-}
 
-struct channel_t
-{
-    unsigned long time;
-    bool activated;
-    bool mid_activated;
-    bool available;
-    byte val;
-    unsigned short id;
-    bool previous_reading;
-    unsigned short n_bits_read;
-};
+    class Channel
+    {
+    protected:
+        int pin;
+        StackBuffer buffer;
+        unsigned int freq;
+        unsigned int delta_us;
+        unsigned long _time;
+        void reset_channel();
+        bool _activated;
+        bool _available;
+        byte _curr_val;
+        unsigned short _n_bits;
+        bool _previous_reading;
+        bool _mid_activated;
 
-struct transmit_t
-{
-    TelegraphUtils::list data;
-    byte bit_n;
-    unsigned long time;
-    bool u;
-};
+    public:
+        Channel(int pin);
+        bool activated();
+        bool available();
+        unsigned short buff_size();
+    };
 
+    class TransmitChannel : public Channel
+    {
+    private:
+        void begin_transmission();
+        void end_transmission();
+        void write(byte data);
+        void transmit_async();
 
-namespace master
-{
-    using namespace TelegraphUtils;
+    public:
+        TransmitChannel(int pin);
+        void begin(unsigned int baud_rate);
+
+        /**
+         * async
+         */
+        void send(byte *data, unsigned short size);
+
+        /**
+         * sync
+         */
+        void tell(byte *data, unsigned short size);
+        void tick();
+    };
+
+    class RecieveChannel : public Channel
+    {
+    private:
+        void wait_activation(unsigned int min_delay_us);
+        void recieve_async();
+
+    public:
+        RecieveChannel(int pin);
+        void begin(unsigned int baud_rate);
+        byte read();
+        byte peek();
+        void await();
+        void recieve(unsigned short size);
+        void tick();
+    };
 
     class Telegraph
     {
     private:
-        int rx_pins[MAX_LISTENERS];
-        int tx_pin;
         unsigned short n_listeners = 0;
-        list buffers[MAX_LISTENERS];
-        channel_t channels[MAX_LISTENERS];
-        transmit_t transmit;
-        unsigned int freq;
-        unsigned int delta_us;
-
-        void begin_transmission();
-        void end_transmission();
-        void transmit_byte(byte data);
-        void reset_channel(unsigned short id);
-        void recieve_async();
-        void transmit_async();
+        unsigned short n_talkers = 0;
+        TransmitChannel txs[MAX_LISTENERS];
+        RecieveChannel rxs[MAX_LISTENERS];
 
     public:
         /**
          * @brief Constructor for a Telgraph instance
-         * @param tx_pin The TX pin which all the modules listen to in parallel
          */
-        Telegraph(int tx_pin);
+        Telegraph();
 
         /**
          * @brief Listen to a specific pins, and register it as a module
          * @return The ID of the connection (used to identify the buffer, the pin...)
          */
-        short listen(int rx_pin);
+        short listen(int rx_pin, unsigned int baud_rate);
+
+        /**
+         * 
+         */
+        short talk(int tx_pin, unsigned int baud_rate);
 
         /**
          * @brief Tell the module that the master is ready, and sets the baud rate
          * @param frequency Baud rate
          */
-        void begin(unsigned int frequency);
-
-        /**
-         * @brief Read the first byte from the buffer (and discard it from the buffer)
-         * @param id The ID of the buffer (returned by `Telegraph::listen()`)
-         * @return The byte read
-         */
-        byte read(unsigned short id);
-
-        /**
-         * @brief Read the first byte in the buffer, and keep it in the buffer
-         * @param id
-         * @return The byte peeked
-         */
-        byte peek(unsigned short id);
-
-        /**
-         * @brief Write a serie of bytes to the TX pin
-         * @param data A pointer to the array of byte to be written
-         * @param size The size of the array
-         * @warning Blocking function
-         */
-        void write(byte *data, unsigned int size);
-
-        /**
-         * @brief Write a serie of bytes to the TX pin, in a non-blocking fashion
-         * @param data A pointer to the array of byte to be written
-         * @param size The size of the array
-         * @warning size < BUFFER_MAX_SIZE
-         */
-        void send(byte *data, unsigned short size);
-
-        /**
-         * @brief Get the logical size of the data buffer
-         * @param id The ID of the buffer
-         * @return The logical size of the buffer
-         */
-        unsigned short buff_size(unsigned short id);
-
-        /**
-         * @brief Check wether a channel is available for communication (is the module ready?)
-         * @param id The ID of the channel
-         * @return A bool
-         */
-        bool available(unsigned short id);
-
-        /**
-         * @brief Wait for a specific channel to be ready
-         * @param id The ID of the channel
-         * @warning Blocking function
-         */
-        void await(unsigned short id);
+        void begin();
 
         /**
          * @brief Waits for all the registered channels to be ready
@@ -200,103 +207,6 @@ namespace master
         void tick();
     };
 
-} // namespace master
-
-namespace client
-{
-    using namespace TelegraphUtils;
-
-    class Telegraph
-    {
-    private:
-        int rx_pin;
-        int tx_pin;
-        list buffer;
-        channel_t channel;
-        transmit_t transmit;
-        unsigned int freq;
-        unsigned int delta_us;
-
-        void begin_transmission();
-        void end_transmission();
-        void transmit_byte(byte data);
-        void wait_activation(unsigned int min_delay_ms);
-        void reset_channel();
-        void recieve_async();
-        void transmit_async();
-
-    public:
-        /**
-         * @brief Constructor for a Telgraph instance
-         * @param tx_pin The TX pin which all the modules listen to in parallel
-         */
-        Telegraph(int rx_pin, int tx_pin);
-
-        /**
-         * @brief Tell the module that the master is ready, and sets the baud rate
-         * @param frequency Baud rate
-         */
-        void begin(unsigned int frequency);
-
-        /**
-         * @brief Read the first byte from the buffer (and discard it from the buffer)
-         * @return The byte read
-         */
-        byte read();
-
-        /**
-         * @brief Read the first byte in the buffer, and keep it in the buffer
-         * @return The byte peeked
-         */
-        byte peek();
-
-        /**
-         * @brief Write a serie of bytes to the TX pin
-         * @param data A pointer to the array of byte to be written
-         * @param size The size of the array
-         * @warning Blocking function
-         */
-        void write(byte *data, unsigned int size);
-
-        /**
-         * @brief Write a serie of bytes to the TX pin, in a non-blocking fashion
-         * @param data A pointer to the array of byte to be written
-         * @param size The size of the array
-         * @warning size < BUFFER_MAX_SIZE
-         */
-        void send(byte *data, unsigned short size);
-
-        /**
-         * @brief Get the logical size of the data buffer
-         * @return The logical size of the buffer
-         */
-        unsigned short buff_size();
-
-        /**
-         * @brief Check wether the channel is available for communication (is the master ready?)
-         * @return A bool
-         */
-        bool available();
-
-        /**
-         * @brief Wait for the channel to be ready
-         * @warning Blocking function
-         */
-        void await();
-
-        /**
-         * @brief Reads all incoming data and place it into the data buffer if there is some
-         * @warning To be called as often as ready. If heavy useage of blocking function is made, decreasing the baud rate can solve the problem
-         */
-        void tick();
-
-        /**
-         * @brief Reads a precized number of bytes and place it into the buffer
-         * @param size The number of bytes to be read
-         * @warning Blocking function
-         */
-        void recv(unsigned short size);
-    };
-} // namespace client
+};
 
 #endif

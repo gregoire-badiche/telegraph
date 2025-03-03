@@ -4,434 +4,152 @@
 
 #define check_id assert(id > n_listeners || id <= 0)
 
-namespace
+namespace telegraph
 {
-    /**
-     * @brief Compute a delta between two ulong, taking into account the possible overflow
-     */
-    unsigned long delta_ulong(unsigned long a, unsigned long b)
+    Channel::Channel(int pin) : pin(pin)
     {
-        if (a < b)
-        {
-            return a + ULONG_MAX - b;
-        }
-        if (a == b)
-        {
-            return 0;
-        }
-        return a - b;
+        buffer = StackBuffer();
+        delta_us = 0;
+        reset_channel();
     }
 
-    /**
-     * @brief Long delay precise to the microseconds, can take any value (while delayMicroseconds() is limited in size)
-     * @param us Delay in microseconds
-     */
-    void precise_delay(unsigned int us)
+    void Channel::reset_channel()
     {
-        unsigned int m = us / 1000;
-        unsigned int u = us - m * 1000;
-        delay(m);
-        delayMicroseconds(u);
-    }
-}
-
-namespace master
-{
-    Telegraph::Telegraph(int tx_pin) : tx_pin(tx_pin)
-    {
-        for (int i = 0; i < MAX_LISTENERS; i++)
-        {
-            buffers[i] = list();
-            reset_channel(i);
-            channels[i].available = false;
-            channels[i].id = i;
-        }
-
-        transmit.time = 0;
-        transmit.u = false;
-        transmit.bit_n = 0x00;
-        transmit.data = list();
+        _time = 0;
+        _activated = 0;
+        _curr_val = 0;
+        _n_bits = 0;
+        _previous_reading = 0;
+        _mid_activated = 0;
     }
 
-    short Telegraph::listen(int rx_pin)
+    bool Channel::activated()
     {
-        pinMode(rx_pin, INPUT);
-        rx_pins[n_listeners] = rx_pin;
-        return n_listeners++;
+        return _activated;
     }
 
-    void Telegraph::begin(unsigned int frequency)
+    bool Channel::available()
     {
-        pinMode(tx_pin, OUTPUT);
-        freq = frequency;
-        delta_us = 1000000 / frequency;
-        digitalWrite(tx_pin, HIGH);
+        return _available;
     }
 
-    byte Telegraph::read(unsigned short id)
+    unsigned short Channel::buff_size()
     {
-        check_id;
-        return buffers[id].pop();
+        return buffer.size();
     }
 
-    byte Telegraph::peek(unsigned short id)
+    TransmitChannel::TransmitChannel(int pin) : Channel(pin)
     {
-        check_id;
-        return buffers[id].peek();
     }
 
-    void Telegraph::write(byte *data, unsigned int size)
+    void TransmitChannel::begin_transmission()
     {
-        // Empty the transmit_async buffer
-        while (!transmit.data.size())
-        {
-            tick();
-        }
-        
-        for (unsigned int i = 0; i < size; i++)
-        {
-            begin_transmission();
-            transmit_byte(data[i]);
-            end_transmission();
-        }
+        digitalWrite(pin, HIGH);
+        precise_delay(delta_us);
+        digitalWrite(pin, LOW);
+        precise_delay(delta_us);
     }
 
-    unsigned short Telegraph::buff_size(unsigned short id)
+    void TransmitChannel::end_transmission()
     {
-        if (id > n_listeners || id < 0)
-            return 0;
-        return buffers[id].size();
+        digitalWrite(pin, HIGH);
     }
 
-    bool Telegraph::available(unsigned short id)
+    void TransmitChannel::write(byte data)
     {
-        check_id;
-        return channels[id].available;
-    }
-
-    void Telegraph::await(unsigned short id)
-    {
-        check_id;
-
         unsigned long t = micros();
-        while (delta_ulong(micros(), t) <= MIN_AVAILABLE_DELTA)
+        for (int i = 0; i < 8; i++)
         {
-            if (digitalRead(rx_pins[id]) == LOW)
-            {
-                t = micros();
-            }
-        }
-        channels[id].available = true;
-    }
-
-    void Telegraph::await_all()
-    {
-        unsigned short s = n_listeners;
-
-        unsigned long times[MAX_LISTENERS];
-
-        for (unsigned short i = 0; i < n_listeners; i++)
-        {
-            times[i] = micros();
-        }
-
-        while (s != 0)
-        {
-            s = n_listeners;
-            for (unsigned short i = 0; i < n_listeners; i++)
-            {
-                if (channels[i].available)
-                {
-                    s--;
-                    continue;
-                }
-                if (delta_ulong(micros(), times[i]) <= MIN_AVAILABLE_DELTA)
-                {
-                    if (digitalRead(rx_pins[i]) == LOW)
-                    {
-                        times[i] = micros();
-                    }
-                }
-                else
-                {
-                    s--;
-                    channels[i].available = true;
-                }
-            }
+            digitalWrite(pin, data & 0x01);
+            data >>= 1;
+            t += delta_us;
+            precise_delay(t - micros());
         }
     }
 
-    void Telegraph::recieve_async()
+    void TransmitChannel::transmit_async()
     {
-        for (unsigned short i = 0; i < n_listeners; i++)
-        {
-            // If the channel is unavailable
-            if (!channels[i].available)
-            {
-                if (digitalRead(rx_pins[i]) == LOW || channels[i].time == 0)
-                {
-                    channels[i].time = micros();
-                }
-                else if (delta_ulong(micros(), channels[i].time) >= MIN_AVAILABLE_DELTA)
-                {
-                    channels[i].available = true;
-                    channels[i].time = 0;
-                }
-
-                return;
-            }
-
-            // If the channel is available but isn't activated yet
-            if (!channels[i].activated)
-            {
-                bool r = digitalRead(rx_pins[i]);
-                if (r == HIGH)
-                {
-                    if (channels[i].previous_reading == LOW)
-                    {
-                        channels[i].time = micros();
-                    }
-                    channels[i].mid_activated = false;
-                    channels[i].previous_reading = HIGH;
-
-                    return;
-                }
-
-                if (delta_ulong(micros(), channels[i].time) < delta_us / 2)
-                    return;
-
-                if (channels[i].previous_reading == HIGH)
-                {
-                    channels[i].mid_activated = true;
-                    channels[i].time = micros();
-                }
-
-                if (channels[i].previous_reading == LOW && channels[i].mid_activated == true)
-                {
-                    channels[i].activated = true;
-                    channels[i].time += delta_us / 2;
-                }
-
-                channels[i].previous_reading = LOW;
-                return;
-            }
-
-            // If the channel is available, activated, and we need to read
-            if (delta_ulong(micros(), channels[i].time) >= delta_us)
-            {
-                channels[i].val >>= 1;
-                channels[i].val += (char)digitalRead(rx_pins[i]) << 7;
-                channels[i].time += delta_us;
-                channels[i].n_bits_read++;
-            }
-
-            // If the channel is available and activated, but it's the end of the byte
-            if (channels[i].n_bits_read >= 8)
-            {
-                if (buffers[i].size() < BUFFER_MAX_SIZE)
-                    buffers[i].push(channels[i].val);
-                reset_channel(i);
-            }
-        }
-    }
-
-    void Telegraph::transmit_async()
-    {
-        if (transmit.data.size() == 0)
+        if (buff_size() == 0)
             return;
 
         // Activation sequence
-        if (transmit.time == 0)
+        if (_time == 0)
         {
-            transmit.bit_n = 0x01;
-            digitalWrite(tx_pin, HIGH);
-            transmit.time = micros();
-            transmit.u = false;
+            _n_bits = 0x01;
+            digitalWrite(pin, HIGH);
+            _time = micros();
+            _activated = false;
             return;
         }
-        if (transmit.u == false)
+        if (_activated == false)
         {
-            if (delta_ulong(micros(), transmit.time) >= delta_us)
+            if (delta_ulong(micros(), _time) >= delta_us)
             {
-                digitalWrite(tx_pin, LOW);
-                transmit.time += delta_us;
-                transmit.u = true;
+                digitalWrite(pin, LOW);
+                _time += delta_us;
+                _activated = true;
             }
             return;
         }
 
         // End of the message
-        if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
+        if (_n_bits == 0x00 && delta_ulong(micros(), _time) >= delta_us)
         {
-            digitalWrite(tx_pin, HIGH);
-            transmit.data.pop();
-            transmit.u = false;
-            transmit.time = 0;
+            digitalWrite(pin, HIGH);
+            buffer.pop();
+            _activated = false;
+            _time = 0;
             return;
         }
 
         // Tranmission of the message
-        if (delta_ulong(micros(), transmit.time) >= delta_us)
+        if (delta_ulong(micros(), _time) >= delta_us)
         {
-            digitalWrite(tx_pin, (transmit.data.peek() & transmit.bit_n) || 0);
-            transmit.bit_n <<= 1;
-            transmit.time += delta_us;
+            digitalWrite(pin, (buffer.peek() & _n_bits) || 0);
+            _n_bits <<= 1;
+            _time += delta_us;
             return;
         }
     }
 
-    void Telegraph::tick()
+    void TransmitChannel::begin(unsigned int baud_rate)
     {
-        recieve_async();
-        transmit_async();
+        pinMode(pin, OUTPUT);
+        freq = baud_rate;
+        delta_us = 1000000 / baud_rate;
+        digitalWrite(pin, HIGH);
     }
 
-    void Telegraph::send(byte *data, unsigned short size)
+    void TransmitChannel::tell(byte *data, unsigned short size)
     {
-        assert(size + transmit.data.size() < BUFFER_MAX_SIZE);
-
-        for (unsigned short i = 0; i < size; i++)
-        {
-            transmit.data.push(data[i]);
-        }
-    }
-
-    void Telegraph::begin_transmission()
-    {
-        digitalWrite(tx_pin, HIGH);
-        precise_delay(delta_us);
-        digitalWrite(tx_pin, LOW);
-        precise_delay(delta_us);
-    }
-
-    void Telegraph::end_transmission()
-    {
-        digitalWrite(tx_pin, HIGH);
-    }
-
-    void Telegraph::transmit_byte(byte data)
-    {
-        unsigned long t = micros();
-        for (int i = 0; i < 8; i++)
-        {
-            digitalWrite(tx_pin, data & 0x01);
-            data >>= 1;
-            t += delta_us;
-            precise_delay(t - micros());
-        }
-    }
-
-    void Telegraph::reset_channel(unsigned short id)
-    {
-        check_id;
-        channels[id].activated = false;
-        channels[id].time = 0;
-        channels[id].mid_activated = false;
-        channels[id].val = 0x00;
-        channels[id].previous_reading = LOW;
-        channels[id].n_bits_read = 0;
-    }
-} // namespace master
-
-namespace client
-{
-    Telegraph::Telegraph(int rx_pin, int tx_pin) : rx_pin(rx_pin), tx_pin(tx_pin)
-    {
-        buffer = list();
-        reset_channel();
-        channel.available = false;
-        channel.id = 0;
-
-        transmit.time = 0;
-        transmit.u = false;
-        transmit.bit_n = 0x00;
-        transmit.data = list();
-    }
-
-    void Telegraph::begin(unsigned int frequency)
-    {
-        pinMode(tx_pin, OUTPUT);
-        pinMode(rx_pin, INPUT);
-        freq = frequency;
-        delta_us = 1000000 / frequency;
-        digitalWrite(tx_pin, HIGH);
-    }
-
-    byte Telegraph::read()
-    {
-        return buffer.pop();
-    }
-
-    byte Telegraph::peek()
-    {
-        return buffer.peek();
-    }
-
-    void Telegraph::write(byte *data, unsigned int size)
-    {
-        // Empty the transmit_async buffer
-        while (!transmit.data.size())
-        {
-            tick();
-        }
-
         for (unsigned short i = 0; i < size; i++)
         {
             begin_transmission();
-            transmit_byte(data[i]);
+            write(data[i]);
             end_transmission();
         }
     }
 
-    unsigned short Telegraph::buff_size()
+    void TransmitChannel::send(byte *data, unsigned short size)
     {
-        return buffer.size();
-    }
+        assert(size + buff_size() < BUFFER_MAX_SIZE);
 
-    bool Telegraph::available()
-    {
-        return channel.available;
-    }
-
-    void Telegraph::await()
-    {
-        unsigned long t = micros();
-        while (delta_ulong(micros(), t) <= MIN_AVAILABLE_DELTA)
+        for (unsigned short i = 0; i < size; i++)
         {
-            if (digitalRead(rx_pin) == LOW)
-            {
-                t = micros();
-            }
-        }
-        channel.available = true;
-    }
-
-    void Telegraph::begin_transmission()
-    {
-        digitalWrite(tx_pin, HIGH);
-        precise_delay(delta_us);
-        digitalWrite(tx_pin, LOW);
-        precise_delay(delta_us);
-    }
-
-    void Telegraph::end_transmission()
-    {
-        digitalWrite(tx_pin, HIGH);
-    }
-
-    void Telegraph::transmit_byte(byte data)
-    {
-        unsigned long t = micros();
-        for (int i = 0; i < 8; i++)
-        {
-            digitalWrite(tx_pin, data & 0x01);
-            data >>= 1;
-            t += delta_us;
-            precise_delay(t - micros());
+            buffer.push(data[i]);
         }
     }
 
-    void Telegraph::wait_activation(unsigned int min_delay_us)
+    void TransmitChannel::tick()
+    {
+        transmit_async();
+    }
+
+    RecieveChannel::RecieveChannel(int pin) : Channel(pin)
+    {
+    }
+
+    void RecieveChannel::wait_activation(unsigned int min_delay_us)
     {
         bool activated = false;
         bool previous_reading = LOW;
@@ -440,7 +158,7 @@ namespace client
 
         while (!activated)
         {
-            bool r = digitalRead(rx_pin);
+            bool r = digitalRead(pin);
             if (r == HIGH)
             {
                 if (previous_reading == LOW)
@@ -467,153 +185,82 @@ namespace client
         }
     }
 
-    void Telegraph::reset_channel()
-    {
-        channel.activated = 0;
-        channel.time = 0;
-        channel.mid_activated = 0;
-        channel.val = 0x00;
-        channel.previous_reading = LOW;
-        channel.n_bits_read = 0;
-    }
-
-    void Telegraph::recieve_async()
+    void RecieveChannel::recieve_async()
     {
         // If the channel is unavailable
-        if (!channel.available)
+        if (!_available)
         {
-            if (digitalRead(rx_pin) == LOW || channel.time == 0)
+            if (digitalRead(pin) == LOW || _time == 0)
             {
-                channel.time = micros();
+                _time = micros();
             }
-            else if (delta_ulong(micros(), channel.time) >= MIN_AVAILABLE_DELTA)
+            else if (delta_ulong(micros(), _time) >= MIN_AVAILABLE_DELTA)
             {
-                channel.available = true;
-                channel.time = 0;
+                _available = true;
+                _time = 0;
             }
 
             return;
         }
 
         // If the channel is available but isn't activated yet
-        if (!channel.activated)
+        if (!_activated)
         {
-            bool r = digitalRead(rx_pin);
+            bool r = digitalRead(pin);
             if (r == HIGH)
             {
-                if (channel.previous_reading == LOW)
+                if (_previous_reading == LOW)
                 {
-                    channel.time = micros();
+                    _time = micros();
                 }
-                channel.mid_activated = false;
-                channel.previous_reading = HIGH;
+                _mid_activated = false;
+                _previous_reading = HIGH;
 
                 return;
             }
 
-            if (delta_ulong(micros(), channel.time) < delta_us / 2)
+            if (delta_ulong(micros(), _time) < delta_us / 2)
                 return;
 
-            if (channel.previous_reading == HIGH)
+            if (_previous_reading == HIGH)
             {
-                channel.mid_activated = true;
-                channel.time = micros();
+                _mid_activated = true;
+                _time = micros();
             }
 
-            if (channel.previous_reading == LOW && channel.mid_activated == true)
+            if (_previous_reading == LOW && _mid_activated == true)
             {
-                channel.activated = true;
-                channel.time += delta_us / 2;
+                _activated = true;
+                _time += delta_us / 2;
             }
 
-            channel.previous_reading = LOW;
+            _previous_reading = LOW;
             return;
         }
 
         // If the channel is available, activated, and we need to read
-        if (delta_ulong(micros(), channel.time) >= delta_us)
+        if (delta_ulong(micros(), _time) >= delta_us)
         {
-            channel.val >>= 1;
-            channel.val += (char)digitalRead(rx_pin) << 7;
-            channel.time += delta_us;
-            channel.n_bits_read++;
+            _curr_val >>= 1;
+            _curr_val += (char)digitalRead(pin) << 7;
+            _time += delta_us;
+            _n_bits++;
         }
 
         // If the channel is available and activated, but it's the end of the byte
-        if (channel.n_bits_read >= 8)
+        if (_n_bits >= 8)
         {
             if (buffer.size() < BUFFER_MAX_SIZE)
-                buffer.push(channel.val);
+                buffer.push(_curr_val);
             reset_channel();
         }
     }
 
-    void Telegraph::transmit_async()
-    {
-        if (transmit.data.size() == 0)
-            return;
-
-        // Activation sequence
-        if (transmit.time == 0)
-        {
-            transmit.bit_n = 0x01;
-            digitalWrite(tx_pin, HIGH);
-            transmit.time = micros();
-            transmit.u = false;
-            return;
-        }
-        if (transmit.u == false)
-        {
-            if (delta_ulong(micros(), transmit.time) >= delta_us)
-            {
-                digitalWrite(tx_pin, LOW);
-                transmit.time += delta_us;
-                transmit.u = true;
-            }
-            return;
-        }
-
-        // End of the message
-        if (transmit.bit_n == 0x00 && delta_ulong(micros(), transmit.time) >= delta_us)
-        {
-            digitalWrite(tx_pin, HIGH);
-            transmit.data.pop();
-            transmit.u = false;
-            transmit.time = 0;
-            return;
-        }
-
-        // Tranmission of the message
-        if (delta_ulong(micros(), transmit.time) >= delta_us)
-        {
-            digitalWrite(tx_pin, (transmit.data.peek() & transmit.bit_n) || 0);
-            transmit.bit_n <<= 1;
-            transmit.time += delta_us;
-            return;
-        }
-    }
-
-    void Telegraph::tick()
-    {
-        recieve_async();
-        transmit_async();
-    }
-
-    void Telegraph::send(byte *data, unsigned short size)
-    {
-        assert(size + transmit.data.size() < BUFFER_MAX_SIZE);
-
-        for (unsigned short i = 0; i < size; i++)
-        {
-            transmit.data.push(data[i]);
-        }
-    }
-
-    void Telegraph::recv(unsigned short size)
+    void RecieveChannel::recieve(unsigned short size)
     {
         assert(size < BUFFER_MAX_SIZE);
 
-        if (!channel.available)
+        if (!_available)
             await();
 
         buffer.clear();
@@ -634,10 +281,50 @@ namespace client
                 t += delta_us;
                 precise_delay(t - micros());
                 val >>= 1;
-                val += (char)digitalRead(rx_pin) << 7;
+                val += (char)digitalRead(pin) << 7;
             }
 
             buffer.push(val);
         }
     }
-} // namespace client
+
+    void RecieveChannel::begin(unsigned int baud_rate)
+    {
+        freq = baud_rate;
+        delta_us = 1000000 / freq;
+        pinMode(pin, INPUT);
+    }
+
+    byte RecieveChannel::read()
+    {
+        return buffer.pop();
+    }
+
+    byte RecieveChannel::peek()
+    {
+        return buffer.peek();
+    }
+
+    void RecieveChannel::await()
+    {
+        unsigned long t = micros();
+        while (delta_ulong(micros(), t) <= MIN_AVAILABLE_DELTA)
+        {
+            if (digitalRead(pin) == LOW)
+            {
+                t = micros();
+            }
+        }
+        _available = true;
+    }
+
+    void RecieveChannel::tick()
+    {
+        recieve_async();
+    }
+
+    Telegraph::Telegraph()
+    {}
+    
+
+}
