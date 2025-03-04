@@ -6,8 +6,10 @@
 
 namespace telegraph
 {
-    Channel::Channel(int pin) : pin(pin)
+    Channel::Channel(int pin, unsigned int baud_rate) : pin(pin)
     {
+        freq = baud_rate;
+        delta_us = 1000000 / freq;
         buffer = StackBuffer();
         delta_us = 0;
         reset_channel();
@@ -38,9 +40,7 @@ namespace telegraph
         return buffer.size();
     }
 
-    TransmitChannel::TransmitChannel(int pin) : Channel(pin)
-    {
-    }
+    TransmitChannel::TransmitChannel(int pin, unsigned int baud_rate) : Channel(pin, baud_rate) {}
 
     void TransmitChannel::begin_transmission()
     {
@@ -112,11 +112,9 @@ namespace telegraph
         }
     }
 
-    void TransmitChannel::begin(unsigned int baud_rate)
+    void TransmitChannel::begin()
     {
         pinMode(pin, OUTPUT);
-        freq = baud_rate;
-        delta_us = 1000000 / baud_rate;
         digitalWrite(pin, HIGH);
     }
 
@@ -145,9 +143,7 @@ namespace telegraph
         transmit_async();
     }
 
-    RecieveChannel::RecieveChannel(int pin) : Channel(pin)
-    {
-    }
+    RecieveChannel::RecieveChannel(int pin, unsigned int baud_rate) : Channel(pin, baud_rate) {}
 
     void RecieveChannel::wait_activation(unsigned int min_delay_us)
     {
@@ -288,10 +284,8 @@ namespace telegraph
         }
     }
 
-    void RecieveChannel::begin(unsigned int baud_rate)
+    void RecieveChannel::begin()
     {
-        freq = baud_rate;
-        delta_us = 1000000 / freq;
         pinMode(pin, INPUT);
     }
 
@@ -323,8 +317,82 @@ namespace telegraph
         recieve_async();
     }
 
-    Telegraph::Telegraph()
-    {}
-    
+    uint8_t Telegraph::listen(int rx_pin, unsigned int baud_rate)
+    {
+        rxs_arr[n_listeners] = RecieveChannel(rx_pin, baud_rate);
+        return n_listeners++;
+    }
 
+    uint8_t Telegraph::talk(int rx_pin, unsigned int baud_rate)
+    {
+        txs_arr[n_talkers] = TransmitChannel(rx_pin, baud_rate);
+        return n_talkers++;
+    }
+
+    void Telegraph::begin()
+    {
+        for (uint8_t i = 0; i < n_listeners; i++)
+        {
+            rxs_arr[i].begin();
+        }
+
+        for (uint8_t i = 0; i < n_talkers; i++)
+        {
+            txs_arr[i].begin();
+        }
+    }
+
+    void Telegraph::await_all()
+    {
+        bool ready = false;
+
+        while (!ready)
+        {
+            ready = true;
+            for (uint8_t i = 0; i < n_listeners; i++)
+            {
+                if (!rxs_arr[i].available())
+                {
+                    ready = false;
+                }
+            }
+        }
+    }
+
+    void Telegraph::tick()
+    {
+        for (uint8_t i = 0; i < n_listeners; i++)
+        {
+            rxs_arr[i].tick();
+        }
+
+        for (uint8_t i = 0; i < n_talkers; i++)
+        {
+            txs_arr[i].tick();
+        }
+    }
+
+    TransmitChannel &Telegraph::txs(uint8_t n)
+    {
+        assert(n < n_talkers);
+        return txs_arr[n];
+    }
+
+    RecieveChannel &Telegraph::rxs(uint8_t n)
+    {
+        assert(n < n_listeners);
+        return rxs_arr[n];
+    }
+
+    TransmitChannel &Telegraph::tx()
+    {
+        assert(0 < n_listeners);
+        return txs_arr[0];
+    }
+
+    RecieveChannel &Telegraph::rx()
+    {
+        assert(0 < n_listeners);
+        return rxs_arr[0];
+    }
 }

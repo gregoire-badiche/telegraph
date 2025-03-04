@@ -117,7 +117,8 @@ namespace telegraph
         bool _mid_activated;
 
     public:
-        Channel(int pin);
+        Channel();
+        Channel(int pin, unsigned int baud_rate);
         bool activated();
         bool available();
         unsigned short buff_size();
@@ -132,8 +133,9 @@ namespace telegraph
         void transmit_async();
 
     public:
-        TransmitChannel(int pin);
-        void begin(unsigned int baud_rate);
+        TransmitChannel() {};
+        TransmitChannel(int pin, unsigned int baud_rate);
+        void begin();
 
         /**
          * async
@@ -154,8 +156,9 @@ namespace telegraph
         void recieve_async();
 
     public:
-        RecieveChannel(int pin);
-        void begin(unsigned int baud_rate);
+        RecieveChannel();
+        RecieveChannel(int pin, unsigned int baud_rate);
+        void begin();
         byte read();
         byte peek();
         void await();
@@ -168,25 +171,32 @@ namespace telegraph
     private:
         unsigned short n_listeners = 0;
         unsigned short n_talkers = 0;
-        TransmitChannel txs[MAX_LISTENERS];
-        RecieveChannel rxs[MAX_LISTENERS];
+        TransmitChannel txs_arr[MAX_LISTENERS];
+        RecieveChannel rxs_arr[MAX_LISTENERS];
 
     public:
         /**
          * @brief Constructor for a Telgraph instance
          */
-        Telegraph();
+        Telegraph() {};
+
+        TransmitChannel& txs(uint8_t n);
+        RecieveChannel& rxs(uint8_t n);
+
+        // First instance of rx and tx
+        TransmitChannel& tx();
+        RecieveChannel& rx();
 
         /**
          * @brief Listen to a specific pins, and register it as a module
          * @return The ID of the connection (used to identify the buffer, the pin...)
          */
-        short listen(int rx_pin, unsigned int baud_rate);
+        uint8_t listen(int rx_pin, unsigned int baud_rate);
 
         /**
-         * 
+         *
          */
-        short talk(int tx_pin, unsigned int baud_rate);
+        uint8_t talk(int tx_pin, unsigned int baud_rate);
 
         /**
          * @brief Tell the module that the master is ready, and sets the baud rate
@@ -206,7 +216,6 @@ namespace telegraph
          */
         void tick();
     };
-
 };
 
 #endif
