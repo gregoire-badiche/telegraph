@@ -4,6 +4,36 @@
 
 #define check_id assert(id > n_listeners || id <= 0)
 
+namespace {
+    /**
+     * @brief Compute a delta between two ulong, taking into account the possible overflow
+     */
+    unsigned long delta_ulong(unsigned long a, unsigned long b)
+    {
+        if (a < b)
+        {
+            return a + ULONG_MAX - b;
+        }
+        if (a == b)
+        {
+            return 0;
+        }
+        return a - b;
+    }
+
+    /**
+     * @brief Long delay precise to the microseconds, can take any value (while delayMicroseconds() is limited in size)
+     * @param us Delay in microseconds
+     */
+    void precise_delay(unsigned int us)
+    {
+        unsigned int m = us / 1000;
+        unsigned int u = us - m * 1000;
+        delay(m);
+        delayMicroseconds(u);
+    }
+}
+
 namespace telegraph
 {
     Channel::Channel(int pin, unsigned int baud_rate) : pin(pin)
@@ -11,7 +41,7 @@ namespace telegraph
         freq = baud_rate;
         delta_us = 1000000 / freq;
         buffer = StackBuffer();
-        delta_us = 0;
+        // delta_us = 0;
         reset_channel();
     }
 
@@ -38,6 +68,11 @@ namespace telegraph
     unsigned short Channel::buff_size()
     {
         return buffer.size();
+    }
+
+    char *Channel::read_buff()
+    {
+        return buffer.get_str();
     }
 
     TransmitChannel::TransmitChannel(int pin, unsigned int baud_rate) : Channel(pin, baud_rate) {}
@@ -69,6 +104,8 @@ namespace telegraph
 
     void TransmitChannel::transmit_async()
     {
+        unsigned long current_time = micros();
+
         if (buff_size() == 0)
             return;
 
@@ -77,13 +114,13 @@ namespace telegraph
         {
             _n_bits = 0x01;
             digitalWrite(pin, HIGH);
-            _time = micros();
+            _time = current_time;
             _activated = false;
             return;
         }
         if (_activated == false)
         {
-            if (delta_ulong(micros(), _time) >= delta_us)
+            if (delta_ulong(current_time, _time) >= delta_us)
             {
                 digitalWrite(pin, LOW);
                 _time += delta_us;
@@ -93,7 +130,7 @@ namespace telegraph
         }
 
         // End of the message
-        if (_n_bits == 0x00 && delta_ulong(micros(), _time) >= delta_us)
+        if ((_n_bits == 0x00 || _n_bits == 0x100) && delta_ulong(current_time, _time) >= delta_us * 2)
         {
             digitalWrite(pin, HIGH);
             buffer.pop();
@@ -103,7 +140,7 @@ namespace telegraph
         }
 
         // Tranmission of the message
-        if (delta_ulong(micros(), _time) >= delta_us)
+        if (!(_n_bits == 0x00 || _n_bits == 0x100) && delta_ulong(current_time, _time) >= delta_us)
         {
             digitalWrite(pin, (buffer.peek() & _n_bits) || 0);
             _n_bits <<= 1;
@@ -147,42 +184,36 @@ namespace telegraph
 
     void RecieveChannel::wait_activation(unsigned int min_delay_us)
     {
-        bool activated = false;
-        bool previous_reading = LOW;
-        bool p = false;
-        unsigned int time = 0;
-
-        while (!activated)
+        while (!_activated)
         {
             bool r = digitalRead(pin);
             if (r == HIGH)
             {
-                if (previous_reading == LOW)
+                if (_previous_reading == LOW)
                 {
-                    time = micros();
+                    _time = micros();
                 }
-                p = false;
-                previous_reading = HIGH;
+                _mid_activated = false;
+                _previous_reading = HIGH;
             }
             else
             {
-                if (previous_reading == HIGH && delta_ulong(micros(), time) >= min_delay_us)
+                if (_previous_reading == HIGH && delta_ulong(micros(), _time) >= min_delay_us)
                 {
-                    p = true;
-                    time += delta_us;
+                    _mid_activated = true;
+                    _time += delta_us;
                 }
-                if (previous_reading == LOW && p == true && delta_ulong(micros(), time) >= min_delay_us)
+                if (_previous_reading == LOW && _mid_activated == true && delta_ulong(micros(), _time) >= min_delay_us)
                 {
-                    activated = true;
+                    _activated = true;
                 }
 
-                previous_reading = LOW;
+                _previous_reading = LOW;
             }
         }
     }
 
-    void RecieveChannel::recieve_async()
-    {
+    bool RecieveChannel::available() {
         // If the channel is unavailable
         if (!_available)
         {
@@ -195,9 +226,14 @@ namespace telegraph
                 _available = true;
                 _time = 0;
             }
-
-            return;
         }
+
+        return _available;
+    }
+
+    void RecieveChannel::recieve_async()
+    {
+        if (!available()) return;
 
         // If the channel is available but isn't activated yet
         if (!_activated)
@@ -353,6 +389,8 @@ namespace telegraph
             {
                 if (!rxs_arr[i].available())
                 {
+                    Serial.print(i);
+                    Serial.println(" not ready");
                     ready = false;
                 }
             }

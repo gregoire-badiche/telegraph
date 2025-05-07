@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <assert.h>
+#include <limits.h>
 
 #ifndef MAX_LISTENERS
 #define MAX_LISTENERS 6
@@ -21,42 +22,15 @@
 namespace telegraph
 {
     /**
-     * @brief Compute a delta between two ulong, taking into account the possible overflow
-     */
-    unsigned long delta_ulong(unsigned long a, unsigned long b)
-    {
-        if (a < b)
-        {
-            return a + ULONG_MAX - b;
-        }
-        if (a == b)
-        {
-            return 0;
-        }
-        return a - b;
-    }
-
-    /**
-     * @brief Long delay precise to the microseconds, can take any value (while delayMicroseconds() is limited in size)
-     * @param us Delay in microseconds
-     */
-    void precise_delay(unsigned int us)
-    {
-        unsigned int m = us / 1000;
-        unsigned int u = us - m * 1000;
-        delay(m);
-        delayMicroseconds(u);
-    }
-
-    /**
      * Implementation of a queue, using a fixed size array for better efficiency
      */
     class StackBuffer
     {
-    private:
+    protected:
         unsigned short start;
         unsigned short stop;
         byte data[BUFFER_MAX_SIZE];
+        char data_str[BUFFER_MAX_SIZE + 1];
 
     public:
         StackBuffer()
@@ -94,6 +68,20 @@ namespace telegraph
             stop = 0;
         }
 
+        char *get_str()
+        {
+            for (unsigned short i = 0; i < size(); i++)
+            {
+                data_str[i] = data[index(i)];
+            }
+
+            start = stop;
+            
+            data[size()] = 0;
+
+            return data_str;
+        }
+
         unsigned short index(unsigned short i)
         {
             return i & (BUFFER_MAX_SIZE - 1);
@@ -117,11 +105,12 @@ namespace telegraph
         bool _mid_activated;
 
     public:
-        Channel();
+        Channel() {};
         Channel(int pin, unsigned int baud_rate);
         bool activated();
         bool available();
         unsigned short buff_size();
+        char *read_buff();
     };
 
     class TransmitChannel : public Channel
@@ -147,16 +136,17 @@ namespace telegraph
          */
         void tell(byte *data, unsigned short size);
         void tick();
-    };
 
+    };
+    
     class RecieveChannel : public Channel
     {
-    private:
+        private:
         void wait_activation(unsigned int min_delay_us);
         void recieve_async();
-
-    public:
-        RecieveChannel();
+        
+        public:
+        RecieveChannel() {};
         RecieveChannel(int pin, unsigned int baud_rate);
         void begin();
         byte read();
@@ -164,17 +154,18 @@ namespace telegraph
         void await();
         void recieve(unsigned short size);
         void tick();
+        bool available();
     };
 
     class Telegraph
     {
     private:
+    TransmitChannel txs_arr[MAX_LISTENERS];
+    RecieveChannel rxs_arr[MAX_LISTENERS];
+    
+    public:
         unsigned short n_listeners = 0;
         unsigned short n_talkers = 0;
-        TransmitChannel txs_arr[MAX_LISTENERS];
-        RecieveChannel rxs_arr[MAX_LISTENERS];
-
-    public:
         /**
          * @brief Constructor for a Telgraph instance
          */
