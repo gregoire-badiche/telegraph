@@ -389,8 +389,6 @@ namespace telegraph
             {
                 if (!rxs_arr[i].available())
                 {
-                    Serial.print(i);
-                    Serial.println(" not ready");
                     ready = false;
                 }
             }
