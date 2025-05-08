@@ -4,7 +4,8 @@
 
 #define check_id assert(id > n_listeners || id <= 0)
 
-namespace {
+namespace
+{
     /**
      * @brief Compute a delta between two ulong, taking into account the possible overflow
      */
@@ -165,6 +166,14 @@ namespace telegraph
         }
     }
 
+    void TransmitChannel::tell(byte data)
+    {
+
+        begin_transmission();
+        write(data);
+        end_transmission();
+    }
+
     void TransmitChannel::send(byte *data, unsigned short size)
     {
         assert(size + buff_size() < BUFFER_MAX_SIZE);
@@ -213,7 +222,8 @@ namespace telegraph
         }
     }
 
-    bool RecieveChannel::available() {
+    bool RecieveChannel::available()
+    {
         // If the channel is unavailable
         if (!_available)
         {
@@ -233,7 +243,8 @@ namespace telegraph
 
     void RecieveChannel::recieve_async()
     {
-        if (!available()) return;
+        if (!available())
+            return;
 
         // If the channel is available but isn't activated yet
         if (!_activated)
@@ -295,10 +306,10 @@ namespace telegraph
         if (!_available)
             await();
 
-        buffer.clear();
-
         // Waits for the end of any currently incoming messages
         precise_delay(delta_us * 9);
+
+        buffer.clear();
 
         for (unsigned short i = 0; i < size; i++)
         {

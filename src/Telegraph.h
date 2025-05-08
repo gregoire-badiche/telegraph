@@ -76,7 +76,7 @@ namespace telegraph
             }
 
             start = stop;
-            
+
             data[size()] = 0;
 
             return data_str;
@@ -135,17 +135,17 @@ namespace telegraph
          * sync
          */
         void tell(byte *data, unsigned short size);
+        void tell(byte data);
         void tick();
-
     };
-    
+
     class RecieveChannel : public Channel
     {
-        private:
+    private:
         void wait_activation(unsigned int min_delay_us);
         void recieve_async();
-        
-        public:
+
+    public:
         RecieveChannel() {};
         RecieveChannel(int pin, unsigned int baud_rate);
         void begin();
@@ -160,9 +160,9 @@ namespace telegraph
     class Telegraph
     {
     private:
-    TransmitChannel txs_arr[MAX_LISTENERS];
-    RecieveChannel rxs_arr[MAX_LISTENERS];
-    
+        TransmitChannel txs_arr[MAX_LISTENERS];
+        RecieveChannel rxs_arr[MAX_LISTENERS];
+
     public:
         unsigned short n_listeners = 0;
         unsigned short n_talkers = 0;
@@ -171,12 +171,12 @@ namespace telegraph
          */
         Telegraph() {};
 
-        TransmitChannel& txs(uint8_t n);
-        RecieveChannel& rxs(uint8_t n);
+        TransmitChannel &txs(uint8_t n);
+        RecieveChannel &rxs(uint8_t n);
 
         // First instance of rx and tx
-        TransmitChannel& tx();
-        RecieveChannel& rx();
+        TransmitChannel &tx();
+        RecieveChannel &rx();
 
         /**
          * @brief Listen to a specific pins, and register it as a module
